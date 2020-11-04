@@ -38,7 +38,7 @@ public:
     tf::TransformListener tfListener;
     tf::StampedTransform lidar2Baselink;
 
-    double lidarOdomTime = -1;
+    double latestLidarOdomTime = -1;
     deque<nav_msgs::Odometry> imuOdomQueue;
 
     TransformFusion()
@@ -81,7 +81,7 @@ public:
 
         lidarOdomAffine = odom2affine(*odomMsg);
 
-        lidarOdomTime = odomMsg->header.stamp.toSec();
+        latestLidarOdomTime = odomMsg->header.stamp.toSec();
     }
 
     void imuOdometryHandler(const nav_msgs::Odometry::ConstPtr& odomMsg)
@@ -96,11 +96,13 @@ public:
         imuOdomQueue.push_back(*odomMsg);
 
         // get latest odometry (at current IMU stamp)
-        if (lidarOdomTime == -1)
+        // 收到lidar odo msg之前, 只保存imu msg
+        if (latestLidarOdomTime == -1)
             return;
+        // 清空lidar之前的imu msg
         while (!imuOdomQueue.empty())
         {
-            if (imuOdomQueue.front().header.stamp.toSec() <= lidarOdomTime)
+            if (imuOdomQueue.front().header.stamp.toSec() <= latestLidarOdomTime)
                 imuOdomQueue.pop_front();
             else
                 break;
@@ -141,7 +143,7 @@ public:
             pose_stamped.header.frame_id = odometryFrame;
             pose_stamped.pose = laserOdometry.pose.pose;
             imuPath.poses.push_back(pose_stamped);
-            while(!imuPath.poses.empty() && imuPath.poses.front().header.stamp.toSec() < lidarOdomTime - 1.0)
+            while(!imuPath.poses.empty() && imuPath.poses.front().header.stamp.toSec() < latestLidarOdomTime - 1.0)
                 imuPath.poses.erase(imuPath.poses.begin());
             if (pubImuPath.getNumSubscribers() != 0)
             {
@@ -159,8 +161,8 @@ public:
 
     std::mutex mtx;
 
-    ros::Subscriber subImu;
-    ros::Subscriber subOdometry;
+    ros::Subscriber subImu;      // from sensor
+    ros::Subscriber subOdometry; // from mapOptimization
     ros::Publisher pubImuOdometry;
 
     bool systemInitialized = false;
@@ -504,7 +506,8 @@ public:
     }
 };
 
-
+// Subscribe: imu data, lidar odometry
+// Publish:   imu odometry
 int main(int argc, char** argv)
 {
     ros::init(argc, argv, "roboat_loam");
